@@ -23,6 +23,7 @@ const loading = ref(false);
 const saving = ref(false);
 const message = ref('');
 const error = ref('');
+const fallbackImage = 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=640&q=80';
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / search.pageSize)));
 const canGoBack = computed(() => search.pageNumber > 1);
@@ -51,6 +52,14 @@ function resetForm() {
   form.categoryText = '';
   form.imageFiles = '';
   form.price = 0;
+}
+
+function imageSource(imageUrl) {
+  return imageUrl?.trim() || fallbackImage;
+}
+
+function handleImageError(event) {
+  event.target.src = fallbackImage;
 }
 
 function editProduct(product) {
@@ -184,8 +193,9 @@ onMounted(loadProducts);
   <main class="app-shell">
     <section class="toolbar">
       <div>
-        <p class="eyebrow">eShop services</p>
-        <h1>Catalogo de productos</h1>
+        <p class="eyebrow">Coleccion urbana · eShop</p>
+        <h1>Tu escaparate de moda</h1>
+        <p class="hero-copy">Administra prendas, precios e imagenes en un solo lugar.</p>
       </div>
       <span class="api-chip">{{ API_BASE }}</span>
     </section>
@@ -213,9 +223,14 @@ onMounted(loadProducts);
         </label>
 
         <label>
-          Imagen
-          <input v-model="form.imageFiles" placeholder="URL o nombre de archivo" />
+          Imagen de la prenda
+          <input v-model="form.imageFiles" type="url" placeholder="https://ejemplo.com/camisa.jpg" />
         </label>
+
+        <div class="image-preview" :class="{ 'is-empty': !form.imageFiles }">
+          <img :src="imageSource(form.imageFiles)" alt="Vista previa de la prenda" @error="handleImageError" />
+          <span>{{ form.imageFiles ? 'Vista previa' : 'Agrega una URL para ver la prenda' }}</span>
+        </div>
 
         <label>
           Precio
@@ -250,6 +265,7 @@ onMounted(loadProducts);
           <table>
             <thead>
               <tr>
+                <th>Imagen</th>
                 <th>Nombre</th>
                 <th>Categoria</th>
                 <th>Precio</th>
@@ -258,12 +274,20 @@ onMounted(loadProducts);
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td colspan="4">Cargando productos...</td>
+                <td colspan="5">Cargando productos...</td>
               </tr>
               <tr v-else-if="products.length === 0">
-                <td colspan="4">No hay productos para mostrar.</td>
+                <td colspan="5">No hay productos para mostrar.</td>
               </tr>
               <tr v-for="product in products" v-else :key="product.id">
+                <td>
+                  <img
+                    class="product-image"
+                    :src="imageSource(product.imageFiles)"
+                    :alt="`Imagen de ${product.name}`"
+                    @error="handleImageError"
+                  />
+                </td>
                 <td>
                   <strong>{{ product.name }}</strong>
                   <small>{{ product.description }}</small>
