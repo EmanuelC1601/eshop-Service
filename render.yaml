@@ -2,6 +2,7 @@ services:
   - type: web
     name: eshop-catalog-api
     runtime: docker
+    plan: free
     dockerfilePath: ./src/Catalog.API/Dockerfile
     healthCheckPath: /health
     envVars:
@@ -17,6 +18,7 @@ services:
   - type: web
     name: eshop-basket-api
     runtime: docker
+    plan: free
     dockerfilePath: ./src/Basket.API/Dockerfile
     healthCheckPath: /health
     envVars:
