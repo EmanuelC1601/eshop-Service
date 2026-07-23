@@ -3,6 +3,10 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Caching.Distributed;
 
 var builder = WebApplication.CreateBuilder(args);
+var databaseConnectionString = ConnectionStringNormalizer.NormalizePostgres(
+    builder.Configuration.GetConnectionString("Database")!);
+var redisConnectionString = ConnectionStringNormalizer.NormalizeRedis(
+    builder.Configuration.GetConnectionString("Redis")!);
 
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 builder.Services.AddCarter();
@@ -32,12 +36,12 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddMarten(opts =>
 {
-    opts.Connection(builder.Configuration.GetConnectionString("Database")!);
+    opts.Connection(databaseConnectionString);
 }).UseLightweightSessions();
 
 builder.Services.AddStackExchangeRedisCache(options =>
 {
-    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+    options.Configuration = redisConnectionString;
     options.InstanceName = "basket:";
 });
 
@@ -50,8 +54,8 @@ builder.Services.AddScoped<IBasketRepository>(provider =>
 });
 
 builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!)
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!);
+    .AddNpgSql(databaseConnectionString)
+    .AddRedis(redisConnectionString);
 
 var app = builder.Build();
 

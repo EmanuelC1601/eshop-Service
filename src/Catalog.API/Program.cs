@@ -2,6 +2,8 @@ using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
+var databaseConnectionString = ConnectionStringNormalizer.NormalizePostgres(
+    builder.Configuration.GetConnectionString("Database")!);
 
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 builder.Services.AddCarter();
@@ -32,11 +34,11 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddMarten(opts =>
 {
-    opts.Connection(builder.Configuration.GetConnectionString("Database")!);
+    opts.Connection(databaseConnectionString);
 }).UseLightweightSessions();
 
 builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
+    .AddNpgSql(databaseConnectionString);
 
 var app = builder.Build();
 
