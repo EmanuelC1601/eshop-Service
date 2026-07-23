@@ -44,6 +44,9 @@ public static class ConnectionStringNormalizer
             ? Uri.UnescapeDataString(credentials[1])
             : Uri.UnescapeDataString(credentials[0]);
 
-        return $"{uri.Host}:{(uri.Port > 0 ? uri.Port : 6379)},password={password},ssl={uri.Scheme == "rediss"},abortConnect=false,connectRetry=3";
+        // Upstash presents its Redis CLI URL with the redis:// scheme while
+        // requiring TLS (--tls). Remote URL-based Redis configurations in this
+        // application are therefore always secured with TLS.
+        return $"{uri.Host}:{(uri.Port > 0 ? uri.Port : 6379)},password={password},ssl=true,abortConnect=false,connectRetry=3";
     }
 }
