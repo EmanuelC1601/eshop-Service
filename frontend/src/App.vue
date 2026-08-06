@@ -2,7 +2,10 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 
 const CATALOG_API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL || 'http://localhost:5001';
+// Netlify can override this through VITE_BASKET_API_BASE_URL. The production
+// fallback keeps the deployed storefront connected to the Render Basket API.
+const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL
+  || (import.meta.env.PROD ? 'https://eshop-basket-api-86q6.onrender.com' : 'http://localhost:5001');
 const CART_USER = 'eshop-demo-user';
 const fallbackImage = 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=640&q=80';
 
