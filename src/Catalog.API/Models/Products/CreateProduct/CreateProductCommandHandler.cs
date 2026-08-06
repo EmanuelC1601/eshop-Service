@@ -16,6 +16,14 @@ namespace Catalog.API.Models.Products.CreateProduct
             CreateProductCommand request,
             CancellationToken cancellationToken)
         {
+            var exists = await documentSession.Query<Product>()
+                .AnyAsync(product => product.Name.Equals(request.Name, StringComparison.OrdinalIgnoreCase), cancellationToken);
+
+            if (exists)
+            {
+                throw new BadRequestException($"Ya existe un producto con el nombre '{request.Name}'. Usa Editar para modificarlo.");
+            }
+
             var product = new Product
             {
                 Id = Guid.NewGuid(),

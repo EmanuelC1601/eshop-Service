@@ -13,6 +13,15 @@ docker compose up --build
 - Basket API: `http://localhost:5001`
 - Frontend: desde `frontend`, ejecutar `npm install` y `npm run dev`
 
+El frontend usa ambas APIs. Para desarrollo local no necesitas variables. Para Netlify configura:
+
+```text
+VITE_API_BASE_URL=https://tu-catalog-api.onrender.com
+VITE_BASKET_API_BASE_URL=https://tu-basket-api.onrender.com
+```
+
+En Render, configura la URL pública de Netlify en `Cors__AllowedOrigins__0` para **los dos** servicios.
+
 ## Despliegue
 
 - `render.yaml` define los servicios para Render.
