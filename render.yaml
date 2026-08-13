@@ -32,3 +32,25 @@ services:
         sync: false
       - key: Cors__AllowedOrigins__0
         sync: false
+
+  - type: web
+    name: eshop-orders-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./src/Orders.API/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:8080
+      - key: Services__BasketUrl
+        sync: false
+      - key: MongoDbSettings__ConnectionString
+        sync: false
+      - key: MongoDbSettings__DatabaseName
+        value: OrdersDb
+      - key: MongoDbSettings__CollectionName
+        value: Orders
+      - key: Cors__AllowedOrigins__0
+        sync: false

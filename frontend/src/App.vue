@@ -6,13 +6,15 @@ const CATALOG_API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 // fallback keeps the deployed storefront connected to the Render Basket API.
 const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL
   || (import.meta.env.PROD ? 'https://eshop-basket-api-86q6.onrender.com' : 'http://localhost:5001');
-const CART_USER = 'eshop-demo-user';
+const ORDERS_API = import.meta.env.VITE_ORDERS_API_BASE_URL || 'http://localhost:5002';
+const CART_USER = 'Emanuel';
 const fallbackImage = 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=640&q=80';
 
 const search = reactive({ name: '', pageNumber: 1, pageSize: 10 });
 const form = reactive({ name: '', description: '', categoryText: '', imageFiles: '', price: 0 });
 const products = ref([]);
 const cart = ref({ id: CART_USER, userName: CART_USER, items: [] });
+const customerId = ref(localStorage.getItem('eshop-customer-id') || CART_USER);
 const editingName = ref('');
 const totalCount = ref(0);
 const loading = ref(false);
@@ -123,7 +125,7 @@ async function deleteProduct(name) {
 async function loadCart() {
   cartLoading.value = true;
   try {
-    const response = await requestJson(BASKET_API, `/basket/${encodeURIComponent(CART_USER)}`);
+    const response = await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`);
     cart.value = response.cart || cart.value;
   } catch (err) {
     // A 404 on the first visit means that this user has not saved a cart yet.
@@ -136,7 +138,7 @@ async function loadCart() {
 async function saveCart(nextItems, successMessage) {
   cartLoading.value = true;
   try {
-    const nextCart = { id: CART_USER, userName: CART_USER, items: nextItems };
+    const nextCart = { id: customerId.value, userName: customerId.value, items: nextItems };
     await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify(nextCart) });
     cart.value = nextCart;
     setNotice(successMessage);
@@ -167,10 +169,33 @@ async function clearCart() {
   if (!cart.value.items.length || !window.confirm('¿Vaciar el carrito?')) return;
   cartLoading.value = true;
   try {
-    await requestJson(BASKET_API, `/basket/${encodeURIComponent(CART_USER)}`, { method: 'DELETE' });
-    cart.value = { id: CART_USER, userName: CART_USER, items: [] };
+    await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' });
+    cart.value = { id: customerId.value, userName: customerId.value, items: [] };
     setNotice('Carrito vaciado.');
   } catch (err) { setError(`No se pudo vaciar el carrito: ${err.message}`); }
+  finally { cartLoading.value = false; }
+}
+
+async function selectCustomer() {
+  const normalized = customerId.value.trim();
+  if (!normalized) return setError('Escribe el nombre del cliente.');
+  customerId.value = normalized;
+  localStorage.setItem('eshop-customer-id', normalized);
+  cart.value = { id: normalized, userName: normalized, items: [] };
+  await loadCart();
+  setNotice(`Carrito de ${normalized} cargado.`);
+}
+
+async function checkout() {
+  if (!cart.value.items.length) return setError('Agrega al menos un producto antes de realizar la compra.');
+  cartLoading.value = true;
+  try {
+    const result = await requestJson(ORDERS_API, '/api/orders', {
+      method: 'POST',
+      body: JSON.stringify({ customerId: customerId.value, basketId: cart.value.id })
+    });
+    setNotice(`Compra generada correctamente. ID de compra: ${result.orderId}`);
+  } catch (err) { setError(`No se pudo generar la compra: ${err.message}`); }
   finally { cartLoading.value = false; }
 }
 
@@ -212,9 +237,12 @@ onMounted(async () => { await Promise.all([loadProducts(), loadCart()]); });
 
       <aside class="panel cart-panel">
         <div class="panel-header"><h2>Carrito</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" type="button" @click="clearCart">Vaciar</button></div>
+        <form class="customer-form" @submit.prevent="selectCustomer"><label>Cliente<input v-model="customerId" placeholder="Ej. Emanuel" /></label><button class="secondary" type="submit">Cargar</button></form>
+        <p class="form-help">Carrito activo: <strong>{{ customerId }}</strong></p>
         <p v-if="cartLoading" class="form-help">Actualizando carrito...</p><p v-else-if="!cart.items.length" class="empty-state">Tu carrito está vacío.</p>
         <ul v-else class="cart-list"><li v-for="item in cart.items" :key="item.productId"><div><strong>{{ item.productName }}</strong><small>${{ money(item.price) }} c/u</small></div><div class="quantity"><button class="secondary" :disabled="cartLoading" type="button" @click="changeQuantity(item, -1)">−</button><span>{{ item.quantity }}</span><button class="secondary" :disabled="cartLoading" type="button" @click="changeQuantity(item, 1)">+</button></div><button class="remove" :disabled="cartLoading" type="button" @click="removeFromCart(item)">×</button></li></ul>
         <div class="cart-total"><span>Total</span><strong>${{ money(cartTotal) }}</strong></div>
+        <button class="primary checkout" :disabled="cartLoading || !cart.items.length" type="button" @click="checkout">Realizar compra</button>
       </aside>
     </section>
   </main>

@@ -5,8 +5,11 @@ services:
     image: postgres:15
   distributedcache:
     image: redis:7.4-alpine
+  ordersdb:
+    image: mongo:8
 
 volumes:
   postgres_catalog:
   postgres_basket:
   redis_data:
+  mongo_orders:
