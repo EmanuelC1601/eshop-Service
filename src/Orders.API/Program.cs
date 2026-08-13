@@ -1,8 +1,15 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 using Orders.API.Application;
 using Orders.API.Infrastructure;
+
+// MongoDB.Driver requires an explicit representation for Guid values in the
+// historical order items. Standard is interoperable with Atlas and Compass.
+BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<MongoDbSettings>(builder.Configuration.GetSection(MongoDbSettings.SectionName));
@@ -38,7 +45,11 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("AllowFrontend");
 
-app.MapPost("/api/orders", async (CreateOrderRequest request, CreateOrderHandler handler, CancellationToken cancellationToken) =>
+app.MapPost("/api/orders", async (
+    CreateOrderRequest request,
+    CreateOrderHandler handler,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
 {
     try
     {
@@ -56,6 +67,11 @@ app.MapPost("/api/orders", async (CreateOrderRequest request, CreateOrderHandler
     catch (MongoException)
     {
         return Results.Problem("No fue posible guardar la orden.", statusCode: StatusCodes.Status500InternalServerError);
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(exception, "Error no controlado al crear una orden para {CustomerId}", request.CustomerId);
+        return Results.Problem("No fue posible generar la orden.", statusCode: StatusCodes.Status500InternalServerError);
     }
 })
 .WithName("CreateOrder")
