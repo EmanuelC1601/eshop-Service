@@ -30,7 +30,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHealthChecks().AddMongoDb(
     serviceProvider => serviceProvider.GetRequiredService<IMongoClient>(),
-    name: "mongodb");
+    name: "mongodb",
+    tags: ["ready"]);
 
 var app = builder.Build();
 app.UseSwagger();
@@ -63,5 +64,11 @@ app.MapPost("/api/orders", async (CreateOrderRequest request, CreateOrderHandler
 .ProducesProblem(StatusCodes.Status500InternalServerError)
 .WithSummary("Genera una orden usando el carrito existente del cliente");
 
-app.MapHealthChecks("/health", new HealthCheckOptions());
+// Render calls /health while starting the container. It must represent the
+// liveness of this API, not the availability of an external managed database.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = check => !check.Tags.Contains("ready")
+});
+app.MapHealthChecks("/health/ready", new HealthCheckOptions());
 app.Run();
