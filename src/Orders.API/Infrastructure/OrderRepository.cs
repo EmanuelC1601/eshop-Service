@@ -8,6 +8,7 @@ public interface IOrderRepository
 {
     Task CreateAsync(Order order, CancellationToken cancellationToken);
     Task<IReadOnlyList<Order>> GetByCustomerAsync(string customerId, CancellationToken cancellationToken);
+    Task<Order?> GetByIdAsync(string orderId, CancellationToken cancellationToken);
 }
 
 public class OrderRepository : IOrderRepository
@@ -28,4 +29,7 @@ public class OrderRepository : IOrderRepository
         await _orders.Find(order => order.CustomerId == customerId)
             .SortByDescending(order => order.CreatedAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<Order?> GetByIdAsync(string orderId, CancellationToken cancellationToken) =>
+        await _orders.Find(order => order.Id == orderId).FirstOrDefaultAsync(cancellationToken);
 }

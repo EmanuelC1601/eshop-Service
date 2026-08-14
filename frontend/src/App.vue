@@ -1,65 +1,40 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { jsPDF } from 'jspdf';
 
 const CATALOG_API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-// Netlify can override this through VITE_BASKET_API_BASE_URL. The production
-// fallback keeps the deployed storefront connected to the Render Basket API.
-const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL
-  || (import.meta.env.PROD ? 'https://eshop-basket-api-86q6.onrender.com' : 'http://localhost:5001');
-const ORDERS_API = import.meta.env.VITE_ORDERS_API_BASE_URL || 'http://localhost:5002';
-const CART_USER = 'Emanuel';
+const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL || (import.meta.env.PROD ? 'https://eshop-basket-api-86q6.onrender.com' : 'http://localhost:5001');
+const ORDERS_API = import.meta.env.VITE_ORDERS_API_BASE_URL || (import.meta.env.PROD ? 'https://eshop-orders-api-l4x7.onrender.com' : 'http://localhost:5002');
 const fallbackImage = 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=640&q=80';
 
-const search = reactive({ name: '', pageNumber: 1, pageSize: 10 });
+const view = ref('catalog');
+const products = ref([]); const totalCount = ref(0); const loading = ref(false); const saving = ref(false);
+const search = reactive({ name: '', pageNumber: 1, pageSize: 8 });
 const form = reactive({ name: '', description: '', categoryText: '', imageFiles: '', price: 0 });
-const products = ref([]);
-const cart = ref({ id: CART_USER, userName: CART_USER, items: [] });
-const customerId = ref(localStorage.getItem('eshop-customer-id') || CART_USER);
-const activeView = ref('catalog');
-const orders = ref([]);
-const editingName = ref('');
-const totalCount = ref(0);
-const loading = ref(false);
-const saving = ref(false);
-const cartLoading = ref(false);
-const ordersLoading = ref(false);
-const message = ref('');
-const error = ref('');
+const editingName = ref(''); const customerId = ref(localStorage.getItem('eshop-customer-id') || '');
+const cart = ref({ id: '', userName: '', items: [] }); const cartLoading = ref(false);
+const orders = ref([]); const ordersLoading = ref(false); const orderIdSearch = ref(''); const selectedOrder = ref(null);
+const productDetail = ref(null); const pendingProduct = ref(null); const customerModal = ref(false);
+const message = ref(''); const error = ref('');
 
-const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / search.pageSize)));
-const canGoBack = computed(() => search.pageNumber > 1);
-const canGoForward = computed(() => search.pageNumber < totalPages.value);
-const cartItemsCount = computed(() => cart.value.items.reduce((total, item) => total + item.quantity, 0));
-const cartTotal = computed(() => cart.value.items.reduce((total, item) => total + Number(item.price) * item.quantity, 0));
 const isEditing = computed(() => Boolean(editingName.value));
+const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / search.pageSize)));
+const cartItemsCount = computed(() => cart.value.items.reduce((sum, item) => sum + item.quantity, 0));
+const cartTotal = computed(() => cart.value.items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0));
+const visibleTitle = computed(() => ({ catalog: 'Catálogo', admin: 'Administración', cart: 'Carrito de compras', orders: 'Mis órdenes' })[view.value]);
 
-function categoriesFromText(value) {
-  return value.split(',').map(category => category.trim()).filter(Boolean);
-}
-
-function setNotice(text) { message.value = text; error.value = ''; }
-function setError(text) { error.value = text; message.value = ''; }
-function resetForm() {
-  form.name = '';
-  form.description = '';
-  form.categoryText = '';
-  form.imageFiles = '';
-  form.price = 0;
-  editingName.value = '';
-}
-function imageSource(imageUrl) { return imageUrl?.trim() || fallbackImage; }
-function handleImageError(event) { event.target.src = fallbackImage; }
-function money(value) { return Number(value || 0).toFixed(2); }
+const money = value => Number(value || 0).toFixed(2);
+const imageSource = value => value?.trim() || fallbackImage;
+const handleImageError = event => { event.target.src = fallbackImage; };
+const categoriesFromText = value => value.split(',').map(x => x.trim()).filter(Boolean);
+const setNotice = text => { message.value = text; error.value = ''; };
+const setError = text => { error.value = text; message.value = ''; };
 
 async function requestJson(baseUrl, path, options = {}) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options
-  });
+  const response = await fetch(`${baseUrl}${path}`, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
   if (!response.ok) {
-    const text = await response.text();
-    let detail = text;
-    try { detail = JSON.parse(text).detail || JSON.parse(text).title || text; } catch { /* response is plain text */ }
+    const text = await response.text(); let detail = text;
+    try { const parsed = JSON.parse(text); detail = parsed.detail || parsed.message || parsed.title || text; } catch { /* plain response */ }
     throw new Error(detail || `HTTP ${response.status}`);
   }
   return response.status === 204 ? null : response.json();
@@ -71,226 +46,91 @@ async function loadProducts() {
     const params = new URLSearchParams({ pageNumber: search.pageNumber, pageSize: search.pageSize });
     if (search.name.trim()) params.set('name', search.name.trim());
     const data = await requestJson(CATALOG_API, `/products/search?${params}`);
-    products.value = data.products || [];
-    totalCount.value = data.totalCount || 0;
-    search.pageNumber = data.pageNumber || search.pageNumber;
-  } catch (err) {
-    setError(`No se pudieron cargar productos: ${err.message}`);
-  } finally { loading.value = false; }
+    products.value = data.products || []; totalCount.value = data.totalCount || 0; search.pageNumber = data.pageNumber || search.pageNumber;
+  } catch (err) { setError(`No se pudieron cargar productos: ${err.message}`); }
+  finally { loading.value = false; }
 }
 
-function editProduct(product) {
-  editingName.value = product.name;
-  form.name = product.name;
-  form.description = product.description;
-  form.categoryText = Array.isArray(product.category) ? product.category.join(', ') : '';
-  form.imageFiles = product.imageFiles;
-  form.price = product.price;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
+function resetForm() { Object.assign(form, { name: '', description: '', categoryText: '', imageFiles: '', price: 0 }); editingName.value = ''; }
+function editProduct(product) { editingName.value = product.name; Object.assign(form, { name: product.name, description: product.description, categoryText: product.category?.join(', ') || '', imageFiles: product.imageFiles, price: product.price }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 async function submitProduct() {
   if (!form.name.trim()) return setError('El nombre del producto es obligatorio.');
-  if (!Number.isFinite(Number(form.price)) || Number(form.price) < 0) return setError('El precio debe ser un número mayor o igual a cero.');
   saving.value = true;
   try {
-    const payload = {
-      name: form.name.trim(), description: form.description.trim(), category: categoriesFromText(form.categoryText),
-      imageFiles: form.imageFiles.trim(), price: Number(form.price)
-    };
-    if (isEditing.value) {
-      await requestJson(CATALOG_API, `/products/${encodeURIComponent(editingName.value)}`, {
-        method: 'PUT', body: JSON.stringify({ ...payload, name: undefined })
-      });
-      setNotice('Producto actualizado correctamente.');
-    } else {
-      await requestJson(CATALOG_API, '/products', { method: 'POST', body: JSON.stringify(payload) });
-      setNotice('Producto insertado correctamente.');
-    }
-    resetForm();
-    await loadProducts();
-  } catch (err) { setError(`No se pudo guardar el producto: ${err.message}`); }
-  finally { saving.value = false; }
+    const payload = { name: form.name.trim(), description: form.description.trim(), category: categoriesFromText(form.categoryText), imageFiles: form.imageFiles.trim(), price: Number(form.price) };
+    if (isEditing.value) await requestJson(CATALOG_API, `/products/${encodeURIComponent(editingName.value)}`, { method: 'PUT', body: JSON.stringify({ ...payload, name: undefined }) });
+    else await requestJson(CATALOG_API, '/products', { method: 'POST', body: JSON.stringify(payload) });
+    setNotice(isEditing.value ? 'Producto actualizado correctamente.' : 'Producto insertado correctamente.'); resetForm(); await loadProducts();
+  } catch (err) { setError(`No se pudo guardar el producto: ${err.message}`); } finally { saving.value = false; }
 }
-
-async function deleteProduct(name) {
-  if (!window.confirm(`¿Eliminar "${name}"?`)) return;
-  saving.value = true;
-  try {
-    await requestJson(CATALOG_API, `/products/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (editingName.value === name) resetForm();
-    setNotice('Producto eliminado correctamente.');
-    await loadProducts();
-  } catch (err) { setError(`No se pudo eliminar el producto: ${err.message}`); }
-  finally { saving.value = false; }
-}
+async function deleteProduct(name) { if (!window.confirm(`¿Eliminar "${name}"?`)) return; saving.value = true; try { await requestJson(CATALOG_API, `/products/${encodeURIComponent(name)}`, { method: 'DELETE' }); if (editingName.value === name) resetForm(); setNotice('Producto eliminado correctamente.'); await loadProducts(); } catch (err) { setError(`No se pudo eliminar el producto: ${err.message}`); } finally { saving.value = false; } }
 
 async function loadCart() {
+  if (!customerId.value.trim()) return;
   cartLoading.value = true;
-  try {
-    const response = await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`);
-    cart.value = response.cart || cart.value;
-  } catch (err) {
-    // A 404 on the first visit means that this user has not saved a cart yet.
-    if (!err.message.includes('404') && !err.message.toLowerCase().includes('not found')) {
-      setError(`No se pudo cargar el carrito: ${err.message}`);
-    }
-  } finally { cartLoading.value = false; }
-}
-
-async function loadOrders() {
-  const normalized = customerId.value.trim();
-  if (!normalized) return setError('Escribe el nombre del cliente para consultar sus órdenes.');
-  ordersLoading.value = true;
-  try {
-    const response = await requestJson(ORDERS_API, `/api/orders/customer/${encodeURIComponent(normalized)}`);
-    orders.value = response.orders || [];
-  } catch (err) {
-    setError(`No se pudieron cargar las órdenes: ${err.message}`);
-  } finally { ordersLoading.value = false; }
-}
-
-async function saveCart(nextItems, successMessage) {
-  cartLoading.value = true;
-  try {
-    const nextCart = { id: customerId.value, userName: customerId.value, items: nextItems };
-    await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify(nextCart) });
-    cart.value = nextCart;
-    setNotice(successMessage);
-  } catch (err) { setError(`No se pudo actualizar el carrito: ${err.message}`); }
+  try { const response = await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value.trim())}`); cart.value = response.cart || cart.value; }
+  catch (err) { if (!err.message.includes('404') && !err.message.toLowerCase().includes('not found')) setError(`No se pudo cargar el carrito: ${err.message}`); }
   finally { cartLoading.value = false; }
 }
-
-function addToCart(product) {
-  const current = cart.value.items.find(item => item.productId === product.id);
-  const nextItems = current
-    ? cart.value.items.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-    : [...cart.value.items, { productId: product.id, productName: product.name, quantity: 1, color: 'Predeterminado', price: product.price }];
-  return saveCart(nextItems, `${product.name} se agregó al carrito.`);
-}
-
-function changeQuantity(item, delta) {
-  const nextItems = cart.value.items
-    .map(current => current.productId === item.productId ? { ...current, quantity: current.quantity + delta } : current)
-    .filter(current => current.quantity > 0);
-  return saveCart(nextItems, 'Carrito actualizado.');
-}
-
-function removeFromCart(item) {
-  return saveCart(cart.value.items.filter(current => current.productId !== item.productId), 'Producto eliminado del carrito.');
-}
-
-async function clearCart() {
-  if (!cart.value.items.length || !window.confirm('¿Vaciar el carrito?')) return;
+async function saveCart(nextItems, success) {
+  const customer = customerId.value.trim(); if (!customer) return;
   cartLoading.value = true;
-  try {
-    await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' });
-    cart.value = { id: customerId.value, userName: customerId.value, items: [] };
-    setNotice('Carrito vaciado.');
-  } catch (err) { setError(`No se pudo vaciar el carrito: ${err.message}`); }
-  finally { cartLoading.value = false; }
+  try { const nextCart = { id: customer, userName: customer, items: nextItems }; await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify(nextCart) }); cart.value = nextCart; setNotice(success); }
+  catch (err) { setError(`No se pudo actualizar el carrito: ${err.message}`); } finally { cartLoading.value = false; }
 }
-
-async function selectCustomer() {
-  const normalized = customerId.value.trim();
-  if (!normalized) return setError('Escribe el nombre del cliente.');
-  customerId.value = normalized;
-  localStorage.setItem('eshop-customer-id', normalized);
-  cart.value = { id: normalized, userName: normalized, items: [] };
-  await Promise.all([loadCart(), loadOrders()]);
-  setNotice(`Carrito de ${normalized} cargado.`);
+async function saveCustomer() {
+  const customer = customerId.value.trim(); if (!customer) return setError('Ingresa tu nombre para continuar.');
+  customerId.value = customer; localStorage.setItem('eshop-customer-id', customer); cart.value = { id: customer, userName: customer, items: [] }; customerModal.value = false;
+  await Promise.all([loadCart(), loadOrders()]); setNotice(`Catálogo para ${customer}.`);
+  if (pendingProduct.value) { const product = pendingProduct.value; pendingProduct.value = null; await addToCart(product); }
 }
+async function requestAdd(product) { if (!customerId.value.trim()) { pendingProduct.value = product; customerModal.value = true; return; } await addToCart(product); }
+async function addToCart(product) { const found = cart.value.items.find(item => item.productId === product.id); const next = found ? cart.value.items.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item) : [...cart.value.items, { productId: product.id, productName: product.name, quantity: 1, color: 'Predeterminado', price: product.price }]; await saveCart(next, `${product.name} se agregó al carrito.`); }
+async function changeQuantity(item, delta) { const next = cart.value.items.map(current => current.productId === item.productId ? { ...current, quantity: current.quantity + delta } : current).filter(current => current.quantity > 0); await saveCart(next, 'Carrito actualizado.'); }
+async function removeFromCart(item) { await saveCart(cart.value.items.filter(current => current.productId !== item.productId), 'Producto eliminado del carrito.'); }
+async function clearCart() { if (!cart.value.items.length || !window.confirm('¿Vaciar el carrito?')) return; cartLoading.value = true; try { await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' }); cart.value = { id: customerId.value, userName: customerId.value, items: [] }; setNotice('Carrito vaciado.'); } catch (err) { setError(`No se pudo vaciar el carrito: ${err.message}`); } finally { cartLoading.value = false; } }
 
+async function loadOrders() { if (!customerId.value.trim()) { orders.value = []; return; } ordersLoading.value = true; try { const data = await requestJson(ORDERS_API, `/api/orders/customer/${encodeURIComponent(customerId.value.trim())}`); orders.value = data.orders || []; } catch (err) { setError(`No se pudieron cargar las órdenes: ${err.message}`); } finally { ordersLoading.value = false; } }
+async function searchOrderById() { if (!orderIdSearch.value.trim()) return setError('Escribe el identificador de la orden.'); ordersLoading.value = true; try { selectedOrder.value = await requestJson(ORDERS_API, `/api/orders/${encodeURIComponent(orderIdSearch.value.trim())}`); setNotice('Orden encontrada.'); } catch (err) { selectedOrder.value = null; setError(`No se encontró la orden: ${err.message}`); } finally { ordersLoading.value = false; } }
 async function checkout() {
-  if (!cart.value.items.length) return setError('Agrega al menos un producto antes de realizar la compra.');
+  if (!customerId.value.trim()) return customerModal.value = true;
+  if (!cart.value.items.length) return setError('Agrega al menos un producto antes de confirmar.');
   cartLoading.value = true;
-  try {
-    const result = await requestJson(ORDERS_API, '/api/orders', {
-      method: 'POST',
-      body: JSON.stringify({ customerId: customerId.value, basketId: cart.value.id })
-    });
-    await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' });
-    cart.value = { id: customerId.value, userName: customerId.value, items: [] };
-    await loadOrders();
-    activeView.value = 'orders';
-    setNotice(`Compra generada correctamente. ID de compra: ${result.orderId}`);
-  } catch (err) { setError(`No se pudo generar la compra: ${err.message}`); }
-  finally { cartLoading.value = false; }
+  try { const result = await requestJson(ORDERS_API, '/api/orders', { method: 'POST', body: JSON.stringify({ customerId: customerId.value, basketId: cart.value.id }) }); const created = await requestJson(ORDERS_API, `/api/orders/${result.orderId}`); await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' }); cart.value = { id: customerId.value, userName: customerId.value, items: [] }; selectedOrder.value = created; await loadOrders(); downloadTicket(created); view.value = 'orders'; setNotice(`Compra confirmada. Orden ${result.orderId} guardada en MongoDB y PDF descargado.`); }
+  catch (err) { setError(`No se pudo generar la compra: ${err.message}`); } finally { cartLoading.value = false; }
 }
-
-function changeView(view) {
-  activeView.value = view;
-  if (view === 'cart') loadCart();
-  if (view === 'orders') loadOrders();
+function downloadTicket(order) {
+  const pdf = new jsPDF({ unit: 'mm', format: [80, 180] }); let y = 12; const line = text => { pdf.text(String(text), 8, y); y += 6; };
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(14); pdf.text('eShop - Ticket de compra', 8, y); y += 8; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+  line(`Orden: ${order.id}`); line(`Cliente: ${order.customerId}`); line(`Fecha: ${new Date(order.createdAt).toLocaleString('es-MX')}`); pdf.line(8, y, 72, y); y += 6;
+  order.items.forEach(item => { const lines = pdf.splitTextToSize(`${item.productName} x${item.quantity}`, 46); pdf.text(lines, 8, y); pdf.text(`$${money(item.lineTotal)}`, 72, y, { align: 'right' }); y += Math.max(6, lines.length * 4.5); });
+  pdf.line(8, y, 72, y); y += 7; pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text(`TOTAL: $${money(order.total)}`, 72, y, { align: 'right' }); y += 10; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Gracias por tu compra.', 40, y, { align: 'center' }); pdf.save(`ticket-${order.id}.pdf`);
 }
-function changePage(delta) { search.pageNumber += delta; loadProducts(); }
+function changeView(next) { view.value = next; if (next === 'cart') loadCart(); if (next === 'orders') loadOrders(); }
 function searchFromFirstPage() { search.pageNumber = 1; loadProducts(); }
+function changePage(delta) { search.pageNumber += delta; loadProducts(); }
 onMounted(async () => { await Promise.all([loadProducts(), loadCart(), loadOrders()]); });
 </script>
 
 <template>
   <main class="app-shell">
-    <section class="toolbar">
-      <div><p class="eyebrow">Colección urbana · eShop</p><h1>Tu escaparate de moda</h1><p class="hero-copy">Administra prendas y agrega productos a un carrito persistente.</p></div>
-      <button class="cart-summary" type="button" @click="changeView('cart')"><span>🛍️ {{ cartItemsCount }} prendas</span><strong>${{ money(cartTotal) }}</strong></button>
+    <section class="toolbar"><div><p class="eyebrow">Colección urbana · eShop</p><h1>{{ visibleTitle }}</h1><p class="hero-copy">Compra prendas, administra el catálogo y consulta tus comprobantes.</p></div><button class="customer-chip" type="button" @click="customerModal = true">{{ customerId ? `Catálogo para: ${customerId}` : 'Catálogo para: indicar cliente' }}</button></section>
+    <nav class="view-navigation"><button :class="{ active: view === 'catalog' }" @click="changeView('catalog')">Catálogo</button><button :class="{ active: view === 'cart' }" @click="changeView('cart')">Ir a carrito ({{ cartItemsCount }})</button><button :class="{ active: view === 'orders' }" @click="changeView('orders')">Mis órdenes</button><button :class="{ active: view === 'admin' }" @click="changeView('admin')">Administración</button></nav>
+    <p v-if="message" class="notice success">{{ message }}</p><p v-if="error" class="notice error">{{ error }}</p>
+
+    <section v-if="view === 'catalog'" class="panel results">
+      <div class="panel-header"><h2>Prendas disponibles</h2><span>{{ totalCount }} resultados</span></div><form class="search-row" @submit.prevent="searchFromFirstPage"><input v-model="search.name" placeholder="Buscar producto por nombre"/><select v-model.number="search.pageSize" @change="searchFromFirstPage"><option :value="8">8</option><option :value="12">12</option><option :value="20">20</option></select><button class="secondary">Buscar</button></form>
+      <div class="product-grid"><p v-if="loading" class="empty-state">Cargando productos...</p><p v-else-if="!products.length" class="empty-state">No hay productos para mostrar.</p><article v-for="product in products" v-else :key="product.id" class="product-card"><img :src="imageSource(product.imageFiles)" :alt="product.name" @error="handleImageError"/><div class="product-card-content"><span class="category">{{ product.category?.join(', ') || 'Sin categoría' }}</span><h3>{{ product.name }}</h3><p>{{ product.description || 'Sin descripción.' }}</p><strong>${{ money(product.price) }}</strong><div class="card-actions"><button class="primary" :disabled="cartLoading" @click="requestAdd(product)">Agregar</button><button class="secondary" @click="productDetail = product">Detalles</button></div></div></article></div>
+      <div class="pagination"><button class="secondary" :disabled="search.pageNumber <= 1" @click="changePage(-1)">Anterior</button><span>Página {{ search.pageNumber }} de {{ totalPages }}</span><button class="secondary" :disabled="search.pageNumber >= totalPages" @click="changePage(1)">Siguiente</button></div>
     </section>
 
-    <nav class="view-navigation" aria-label="Navegación principal">
-      <button :class="{ active: activeView === 'catalog' }" type="button" @click="changeView('catalog')">Catálogo</button>
-      <button :class="{ active: activeView === 'cart' }" type="button" @click="changeView('cart')">Carrito <span v-if="cartItemsCount">({{ cartItemsCount }})</span></button>
-      <button :class="{ active: activeView === 'orders' }" type="button" @click="changeView('orders')">Mis órdenes</button>
-    </nav>
+    <section v-else-if="view === 'admin'" class="admin-workspace"><form class="panel editor" @submit.prevent="submitProduct"><div class="panel-header"><h2>{{ isEditing ? 'Editar producto' : 'Nuevo producto' }}</h2><button class="secondary" type="button" @click="resetForm">Limpiar</button></div><label>Nombre<input v-model="form.name" :disabled="isEditing" required/></label><label>Descripción<textarea v-model="form.description" rows="4"/></label><label>Categorías<input v-model="form.categoryText" placeholder="Ropa, Calzado"/></label><label>URL de imagen<input v-model="form.imageFiles" type="url"/></label><div class="image-preview"><img :src="imageSource(form.imageFiles)" @error="handleImageError"/><span>Vista previa</span></div><label>Precio<input v-model.number="form.price" min="0" step="0.01" type="number" required/></label><button class="primary" :disabled="saving">{{ saving ? 'Guardando...' : isEditing ? 'Guardar cambios' : 'Insertar producto' }}</button></form><section class="panel results"><div class="panel-header"><h2>Gestión de productos</h2><span>{{ totalCount }} resultados</span></div><form class="search-row" @submit.prevent="searchFromFirstPage"><input v-model="search.name" placeholder="Buscar por nombre"/><select v-model.number="search.pageSize" @change="searchFromFirstPage"><option :value="8">8</option><option :value="12">12</option></select><button class="secondary">Buscar</button></form><div class="product-grid"><article v-for="product in products" :key="product.id" class="product-card"><img :src="imageSource(product.imageFiles)" @error="handleImageError"/><div class="product-card-content"><h3>{{ product.name }}</h3><p>${{ money(product.price) }}</p><div class="card-actions"><button class="secondary" @click="editProduct(product)">Editar</button><button class="danger" :disabled="saving" @click="deleteProduct(product.name)">Eliminar</button></div></div></article></div><div class="pagination"><button class="secondary" :disabled="search.pageNumber <= 1" @click="changePage(-1)">Anterior</button><span>Página {{ search.pageNumber }} de {{ totalPages }}</span><button class="secondary" :disabled="search.pageNumber >= totalPages" @click="changePage(1)">Siguiente</button></div></section></section>
 
-    <section v-if="activeView === 'catalog'" class="workspace catalog-workspace">
-      <form class="panel editor" @submit.prevent="submitProduct">
-        <div class="panel-header"><h2>{{ isEditing ? 'Editar producto' : 'Nuevo producto' }}</h2><button class="secondary" type="button" @click="resetForm">{{ isEditing ? 'Cancelar' : 'Limpiar' }}</button></div>
-        <p v-if="isEditing" class="form-help">El nombre identifica al producto y no se cambia durante la edición.</p>
-        <label>Nombre<input v-model="form.name" :disabled="isEditing" autocomplete="off" placeholder="Nombre del producto" /></label>
-        <label>Descripción<textarea v-model="form.description" rows="4" placeholder="Descripción breve"></textarea></label>
-        <label>Categorías<input v-model="form.categoryText" placeholder="Ropa, Calzado, Accesorios" /></label>
-        <label>Imagen de la prenda<input v-model="form.imageFiles" type="url" placeholder="https://ejemplo.com/camisa.jpg" /></label>
-        <div class="image-preview" :class="{ 'is-empty': !form.imageFiles }"><img :src="imageSource(form.imageFiles)" alt="Vista previa de la prenda" @error="handleImageError" /><span>{{ form.imageFiles ? 'Vista previa' : 'Agrega una URL para ver la prenda' }}</span></div>
-        <label>Precio<input v-model.number="form.price" min="0" step="0.01" type="number" /></label>
-        <button class="primary" :disabled="saving" type="submit">{{ saving ? 'Guardando...' : isEditing ? 'Guardar cambios' : 'Insertar producto' }}</button>
-      </form>
+    <section v-else-if="view === 'cart'" class="single-view"><section class="panel cart-panel"><div class="panel-header"><h2>Resumen del carrito</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" @click="clearCart">Vaciar</button></div><p class="form-help">Cliente: <strong>{{ customerId || 'Sin cliente seleccionado' }}</strong></p><p v-if="!cart.items.length" class="empty-state">Aún no agregas productos.</p><ul v-else class="cart-list"><li v-for="item in cart.items" :key="item.productId"><div><strong>{{ item.productName }}</strong><small>${{ money(item.price) }} c/u</small></div><div class="quantity"><button class="secondary" @click="changeQuantity(item,-1)">−</button><span>{{ item.quantity }}</span><button class="secondary" @click="changeQuantity(item,1)">+</button></div><button class="remove" @click="removeFromCart(item)">×</button></li></ul><div class="cart-total"><span>Total</span><strong>${{ money(cartTotal) }}</strong></div></section><section v-if="cart.items.length" class="ticket-preview"><p>eShop · Vista previa</p><h2>Ticket de compra</h2><small>Cliente: {{ customerId }}<br/>Fecha: {{ new Date().toLocaleString('es-MX') }}</small><hr/><div v-for="item in cart.items" :key="item.productId" class="ticket-line"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.price * item.quantity) }}</strong></div><hr/><div class="ticket-total">TOTAL <strong>${{ money(cartTotal) }}</strong></div><button class="primary checkout" :disabled="cartLoading" @click="checkout">Confirmar compra y generar orden</button></section></section>
 
-      <section class="panel results">
-        <div class="panel-header"><h2>Catálogo</h2><span>{{ totalCount }} resultados</span></div>
-        <form class="search-row" @submit.prevent="searchFromFirstPage"><input v-model="search.name" placeholder="Buscar por nombre" /><select v-model.number="search.pageSize" @change="searchFromFirstPage"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select><button class="secondary" type="submit">Buscar</button></form>
-        <p v-if="message" class="notice success">{{ message }}</p><p v-if="error" class="notice error">{{ error }}</p>
-        <div class="product-grid">
-          <p v-if="loading" class="empty-state">Cargando productos...</p><p v-else-if="products.length === 0" class="empty-state">No hay productos para mostrar.</p>
-          <article v-for="product in products" v-else :key="product.id" class="product-card"><img :src="imageSource(product.imageFiles)" :alt="`Imagen de ${product.name}`" @error="handleImageError" /><div class="product-card-content"><span class="category">{{ product.category?.join(', ') || 'Sin categoría' }}</span><h3>{{ product.name }}</h3><p>{{ product.description || 'Sin descripción.' }}</p><strong>${{ money(product.price) }}</strong><div class="card-actions"><button class="primary" :disabled="cartLoading" type="button" @click="addToCart(product)">Agregar</button><button class="secondary" type="button" @click="editProduct(product)">Editar</button><button class="danger" :disabled="saving" type="button" @click="deleteProduct(product.name)">Eliminar</button></div></div></article>
-        </div>
-        <div class="pagination"><button class="secondary" :disabled="!canGoBack" type="button" @click="changePage(-1)">Anterior</button><span>Página {{ search.pageNumber }} de {{ totalPages }}</span><button class="secondary" :disabled="!canGoForward" type="button" @click="changePage(1)">Siguiente</button></div>
-      </section>
+    <section v-else class="single-view"><section class="panel orders-panel"><div class="panel-header"><div><h2>Consulta de órdenes</h2><p class="form-help">Busca por cliente o por identificador.</p></div><button class="secondary" :disabled="ordersLoading" @click="loadOrders">Actualizar cliente</button></div><div class="order-search"><label>Cliente<input v-model="customerId" placeholder="Nombre del cliente" @change="saveCustomer"/></label><button class="secondary" @click="saveCustomer">Buscar por cliente</button><label>ID de orden<input v-model="orderIdSearch" placeholder="Ej. 6a7e..."/></label><button class="secondary" @click="searchOrderById">Buscar por ID</button></div><article v-if="selectedOrder" class="order-card"><div class="order-heading"><div><strong>Orden #{{ selectedOrder.id }}</strong><small>{{ new Date(selectedOrder.createdAt).toLocaleString('es-MX') }}</small></div><button class="primary" @click="downloadTicket(selectedOrder)">Descargar PDF</button></div><ul><li v-for="item in selectedOrder.items" :key="item.productId"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(selectedOrder.total) }}</strong></div></article><p v-if="ordersLoading" class="empty-state">Cargando órdenes...</p><p v-else-if="customerId && !orders.length && !selectedOrder" class="empty-state">No hay órdenes para este cliente.</p><article v-for="order in orders" :key="order.id" class="order-card"><div class="order-heading"><div><strong>Orden #{{ order.id }}</strong><small>{{ new Date(order.createdAt).toLocaleString('es-MX') }}</small></div><button class="secondary" @click="downloadTicket(order)">PDF</button></div><ul><li v-for="item in order.items" :key="`${order.id}-${item.productId}`"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(order.total) }}</strong></div></article></section></section>
 
-    </section>
-
-    <section v-else-if="activeView === 'cart'" class="single-view">
-      <aside class="panel cart-panel">
-        <div class="panel-header"><h2>Carrito de compras</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" type="button" @click="clearCart">Vaciar</button></div>
-        <form class="customer-form" @submit.prevent="selectCustomer"><label>Cliente<input v-model="customerId" placeholder="Ej. Emanuel" /></label><button class="secondary" type="submit">Cargar</button></form>
-        <p class="form-help">Carrito activo: <strong>{{ customerId }}</strong></p>
-        <p v-if="cartLoading" class="form-help">Actualizando carrito...</p><p v-else-if="!cart.items.length" class="empty-state">Tu carrito está vacío.</p>
-        <ul v-else class="cart-list"><li v-for="item in cart.items" :key="item.productId"><div><strong>{{ item.productName }}</strong><small>${{ money(item.price) }} c/u</small></div><div class="quantity"><button class="secondary" :disabled="cartLoading" type="button" @click="changeQuantity(item, -1)">−</button><span>{{ item.quantity }}</span><button class="secondary" :disabled="cartLoading" type="button" @click="changeQuantity(item, 1)">+</button></div><button class="remove" :disabled="cartLoading" type="button" @click="removeFromCart(item)">×</button></li></ul>
-        <div class="cart-total"><span>Total</span><strong>${{ money(cartTotal) }}</strong></div>
-        <button class="primary checkout" :disabled="cartLoading || !cart.items.length" type="button" @click="checkout">Realizar compra</button>
-      </aside>
-    </section>
-
-    <section v-else class="single-view">
-      <section class="panel orders-panel">
-        <div class="panel-header"><div><h2>Órdenes del cliente</h2><p class="form-help">Consulta el historial guardado en MongoDB.</p></div><button class="secondary" :disabled="ordersLoading" type="button" @click="loadOrders">{{ ordersLoading ? 'Consultando...' : 'Actualizar' }}</button></div>
-        <form class="customer-form" @submit.prevent="selectCustomer"><label>Cliente<input v-model="customerId" placeholder="Ej. Emanuel" /></label><button class="secondary" type="submit">Consultar</button></form>
-        <p class="form-help">Mostrando órdenes de: <strong>{{ customerId || 'sin cliente seleccionado' }}</strong></p>
-        <p v-if="ordersLoading" class="empty-state">Cargando órdenes...</p>
-        <p v-else-if="!orders.length" class="empty-state">Este cliente todavía no tiene órdenes registradas.</p>
-        <article v-for="order in orders" v-else :key="order.id" class="order-card">
-          <div class="order-heading"><div><strong>Orden #{{ order.id }}</strong><small>{{ new Date(order.createdAt).toLocaleString('es-MX') }}</small></div><strong>${{ money(order.total) }}</strong></div>
-          <ul><li v-for="item in order.items" :key="`${order.id}-${item.productId}`"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul>
-        </article>
-      </section>
-    </section>
+    <div v-if="customerModal" class="modal-backdrop"><form class="modal-card" @submit.prevent="saveCustomer"><h2>Ingresa tu nombre</h2><p>Necesitamos identificar tu carrito y tus órdenes.</p><input v-model="customerId" autofocus placeholder="Tu nombre"/><div class="modal-actions"><button class="secondary" type="button" @click="customerModal=false">Cancelar</button><button class="primary">Guardar y continuar</button></div></form></div>
+    <div v-if="productDetail" class="modal-backdrop"><article class="modal-card product-modal"><button class="close" @click="productDetail=null">×</button><img :src="imageSource(productDetail.imageFiles)" @error="handleImageError"/><span class="category">{{ productDetail.category?.join(', ') }}</span><h2>{{ productDetail.name }}</h2><p>{{ productDetail.description }}</p><strong>${{ money(productDetail.price) }}</strong><button class="primary" @click="requestAdd(productDetail); productDetail=null">Agregar al carrito</button></article></div>
   </main>
 </template>

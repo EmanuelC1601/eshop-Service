@@ -5,6 +5,7 @@ using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 using Orders.API.Application;
+using Orders.API.Domain;
 using Orders.API.Infrastructure;
 
 // MongoDB.Driver requires an explicit representation for Guid values in the
@@ -95,6 +96,19 @@ app.MapGet("/api/orders/customer/{customerId}", async (
 .Produces(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status400BadRequest)
 .WithSummary("Consulta todas las órdenes de un cliente");
+
+app.MapGet("/api/orders/{orderId}", async (
+    string orderId,
+    IOrderRepository repository,
+    CancellationToken cancellationToken) =>
+{
+    var order = await repository.GetByIdAsync(orderId, cancellationToken);
+    return order is null ? Results.NotFound(new { message = "No se encontró la orden indicada." }) : Results.Ok(order);
+})
+.WithName("GetOrderById")
+.Produces<Order>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithSummary("Consulta una orden por su identificador");
 
 // Render calls /health while starting the container. It must represent the
 // liveness of this API, not the availability of an external managed database.
