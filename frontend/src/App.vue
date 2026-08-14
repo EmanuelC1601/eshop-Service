@@ -15,7 +15,7 @@ const view = ref('catalog');
 const products = ref([]); const totalCount = ref(0); const loading = ref(false); const saving = ref(false);
 const search = reactive({ name: '', pageNumber: 1, pageSize: 8 });
 const form = reactive({ name: '', description: '', categoryText: '', imageFiles: '', price: 0 });
-const editingName = ref(''); const customerId = ref(localStorage.getItem('eshop-customer-id') || '');
+const editingName = ref(''); const customerId = ref('');
 const cart = ref({ id: '', userName: '', items: [] }); const cartLoading = ref(false);
 const checkoutStage = ref('summary'); const generatedOrder = ref(null);
 const orders = ref([]); const ordersLoading = ref(false); const orderIdSearch = ref(''); const selectedOrder = ref(null);
@@ -86,7 +86,7 @@ async function saveCart(nextItems, success) {
 }
 async function saveCustomer() {
   const customer = customerId.value.trim(); if (!customer) return setError('Ingresa tu nombre para continuar.');
-  customerId.value = customer; localStorage.setItem('eshop-customer-id', customer); cart.value = { id: customer, userName: customer, items: [] }; customerModal.value = false;
+  customerId.value = customer; cart.value = { id: customer, userName: customer, items: [] }; customerModal.value = false;
   await Promise.all([loadCart(), loadOrders()]); setNotice(`Catálogo para ${customer}.`);
   if (pendingProduct.value) { const product = pendingProduct.value; pendingProduct.value = null; await addToCart(product); }
 }
@@ -97,7 +97,7 @@ async function removeFromCart(item) { await saveCart(cart.value.items.filter(cur
 async function clearCart() { if (!cart.value.items.length || !window.confirm('¿Vaciar el carrito?')) return; cartLoading.value = true; try { await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' }); cart.value = { id: customerId.value, userName: customerId.value, items: [] }; setNotice('Carrito vaciado.'); } catch (err) { setError(`No se pudo vaciar el carrito: ${err.message}`); } finally { cartLoading.value = false; } }
 
 async function loadOrders() { if (!customerId.value.trim()) { orders.value = []; return; } ordersLoading.value = true; try { const data = await requestJson(ORDERS_API, `/api/orders/customer/${encodeURIComponent(customerId.value.trim())}`); orders.value = data.orders || []; } catch (err) { setError(`No se pudieron cargar las órdenes: ${err.message}`); } finally { ordersLoading.value = false; } }
-async function searchOrderById() { if (!orderIdSearch.value.trim()) return setError('Escribe el identificador de la orden.'); ordersLoading.value = true; try { selectedOrder.value = await requestJson(ORDERS_API, `/api/orders/${encodeURIComponent(orderIdSearch.value.trim())}`); customerId.value = selectedOrder.value.customerId; localStorage.setItem('eshop-customer-id', customerId.value); await loadOrders(); setNotice('Orden encontrada; se cargó el historial completo del cliente.'); } catch (err) { selectedOrder.value = null; setError(`No se encontró la orden: ${err.message}`); } finally { ordersLoading.value = false; } }
+async function searchOrderById() { if (!orderIdSearch.value.trim()) return setError('Escribe el identificador de la orden.'); ordersLoading.value = true; try { selectedOrder.value = await requestJson(ORDERS_API, `/api/orders/${encodeURIComponent(orderIdSearch.value.trim())}`); customerId.value = selectedOrder.value.customerId; await loadOrders(); setNotice('Orden encontrada; se cargó el historial completo del cliente.'); } catch (err) { selectedOrder.value = null; setError(`No se encontró la orden: ${err.message}`); } finally { ordersLoading.value = false; } }
 async function searchOrderFromPdf(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -134,7 +134,7 @@ function downloadTicket(order) {
   order.items.forEach(item => { const lines = pdf.splitTextToSize(`${item.productName} x${item.quantity}`, 46); pdf.text(lines, 8, y); pdf.text(`$${money(item.lineTotal)}`, 72, y, { align: 'right' }); y += Math.max(6, lines.length * 4.5); });
   pdf.line(8, y, 72, y); y += 6; line(`SUBTOTAL: $${money(order.subtotal)}`); line(`IVA (16%): $${money(order.tax)}`); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.text(`TOTAL: $${money(order.total)}`, 72, y, { align: 'right' }); y += 10; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Gracias por tu compra.', 40, y, { align: 'center' }); pdf.save(`ticket-${order.id}.pdf`);
 }
-function downloadGeneratedOrder() { if (!generatedOrder.value) return; downloadTicket(generatedOrder.value); customerId.value = ''; localStorage.removeItem('eshop-customer-id'); cart.value = { id: '', userName: '', items: [] }; orders.value = []; selectedOrder.value = null; generatedOrder.value = null; checkoutStage.value = 'summary'; view.value = 'catalog'; setNotice('Orden descargada. Sesión de compra finalizada.'); }
+function downloadGeneratedOrder() { if (!generatedOrder.value) return; downloadTicket(generatedOrder.value); customerId.value = ''; cart.value = { id: '', userName: '', items: [] }; orders.value = []; selectedOrder.value = null; generatedOrder.value = null; checkoutStage.value = 'summary'; view.value = 'catalog'; setNotice('Orden descargada. Sesión de compra finalizada.'); }
 function changeView(next) { view.value = next; if (next === 'cart') loadCart(); if (next === 'orders') loadOrders(); }
 function searchFromFirstPage() { search.pageNumber = 1; loadProducts(); }
 function changePage(delta) { search.pageNumber += delta; loadProducts(); }
