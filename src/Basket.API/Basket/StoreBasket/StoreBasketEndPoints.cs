@@ -1,16 +1,18 @@
 namespace Basket.API.Basket.StoreBasket
 {
-    public record StoreBasketRequest(ShoppingCart Cart);
-
     public record StoreBasketResponse(string UserName);
 
     public class StoreBasketEndPoints : ICarterModule
     {
         public void AddRoutes(IEndpointRouteBuilder app)
         {
-            app.MapPost("/basket", async (StoreBasketRequest request, ISender sender) =>
+            app.MapPost("/basket", async (ShoppingCart cart, ISender sender) =>
             {
-                var result = await sender.Send(new StoreBasketCommand(request.Cart));
+                if (string.IsNullOrWhiteSpace(cart.UserName))
+                    return Results.BadRequest(new { message = "El nombre del cliente es obligatorio." });
+
+                cart.Items ??= [];
+                var result = await sender.Send(new StoreBasketCommand(cart));
 
                 return Results.Created($"/basket/{result.UserName}", new StoreBasketResponse(result.UserName));
             })

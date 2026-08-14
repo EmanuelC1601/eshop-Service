@@ -154,8 +154,7 @@ async function saveCart(nextItems, successMessage) {
   cartLoading.value = true;
   try {
     const nextCart = { id: customerId.value, userName: customerId.value, items: nextItems };
-    // Basket.API receives a StoreBasketRequest, whose payload wraps the cart.
-    await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify({ cart: nextCart }) });
+    await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify(nextCart) });
     cart.value = nextCart;
     setNotice(successMessage);
   } catch (err) { setError(`No se pudo actualizar el carrito: ${err.message}`); }
