@@ -11,6 +11,7 @@
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
     "jspdf": "^3.0.1",
+    "pdfjs-dist": "^5.4.296",
     "vite": "^7.0.6",
     "vue": "^3.5.18"
   }

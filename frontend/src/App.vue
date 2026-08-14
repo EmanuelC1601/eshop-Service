@@ -1,6 +1,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { jsPDF } from 'jspdf';
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const CATALOG_API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 const BASKET_API = import.meta.env.VITE_BASKET_API_BASE_URL || (import.meta.env.PROD ? 'https://eshop-basket-api-86q6.onrender.com' : 'http://localhost:5001');
@@ -14,6 +18,7 @@ const form = reactive({ name: '', description: '', categoryText: '', imageFiles:
 const editingName = ref(''); const customerId = ref(localStorage.getItem('eshop-customer-id') || '');
 const cart = ref({ id: '', userName: '', items: [] }); const cartLoading = ref(false);
 const orders = ref([]); const ordersLoading = ref(false); const orderIdSearch = ref(''); const selectedOrder = ref(null);
+const pdfLoading = ref(false);
 const productDetail = ref(null); const pendingProduct = ref(null); const customerModal = ref(false);
 const message = ref(''); const error = ref('');
 
@@ -92,6 +97,26 @@ async function clearCart() { if (!cart.value.items.length || !window.confirm('¿
 
 async function loadOrders() { if (!customerId.value.trim()) { orders.value = []; return; } ordersLoading.value = true; try { const data = await requestJson(ORDERS_API, `/api/orders/customer/${encodeURIComponent(customerId.value.trim())}`); orders.value = data.orders || []; } catch (err) { setError(`No se pudieron cargar las órdenes: ${err.message}`); } finally { ordersLoading.value = false; } }
 async function searchOrderById() { if (!orderIdSearch.value.trim()) return setError('Escribe el identificador de la orden.'); ordersLoading.value = true; try { selectedOrder.value = await requestJson(ORDERS_API, `/api/orders/${encodeURIComponent(orderIdSearch.value.trim())}`); setNotice('Orden encontrada.'); } catch (err) { selectedOrder.value = null; setError(`No se encontró la orden: ${err.message}`); } finally { ordersLoading.value = false; } }
+async function searchOrderFromPdf(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  pdfLoading.value = true;
+  try {
+    const pdf = await getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    let text = '';
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      text += ` ${content.items.map(item => item.str).join(' ')}`;
+    }
+    const match = text.match(/Orden\s*:\s*([a-f0-9]{24})/i) || text.match(/Orden\s*#\s*([a-f0-9]{24})/i);
+    if (!match) throw new Error('El PDF no contiene un identificador de orden válido de eShop.');
+    orderIdSearch.value = match[1];
+    await searchOrderById();
+    setNotice(`Ticket leído correctamente. Orden ${match[1]} encontrada.`);
+  } catch (err) { setError(`No se pudo leer el PDF: ${err.message}`); }
+  finally { pdfLoading.value = false; event.target.value = ''; }
+}
 async function checkout() {
   if (!customerId.value.trim()) return customerModal.value = true;
   if (!cart.value.items.length) return setError('Agrega al menos un producto antes de confirmar.');
@@ -128,7 +153,7 @@ onMounted(async () => { await Promise.all([loadProducts(), loadCart(), loadOrder
 
     <section v-else-if="view === 'cart'" class="single-view"><section class="panel cart-panel"><div class="panel-header"><h2>Resumen del carrito</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" @click="clearCart">Vaciar</button></div><p class="form-help">Cliente: <strong>{{ customerId || 'Sin cliente seleccionado' }}</strong></p><p v-if="!cart.items.length" class="empty-state">Aún no agregas productos.</p><ul v-else class="cart-list"><li v-for="item in cart.items" :key="item.productId"><div><strong>{{ item.productName }}</strong><small>${{ money(item.price) }} c/u</small></div><div class="quantity"><button class="secondary" @click="changeQuantity(item,-1)">−</button><span>{{ item.quantity }}</span><button class="secondary" @click="changeQuantity(item,1)">+</button></div><button class="remove" @click="removeFromCart(item)">×</button></li></ul><div class="cart-total"><span>Total</span><strong>${{ money(cartTotal) }}</strong></div></section><section v-if="cart.items.length" class="ticket-preview"><p>eShop · Vista previa</p><h2>Ticket de compra</h2><small>Cliente: {{ customerId }}<br/>Fecha: {{ new Date().toLocaleString('es-MX') }}</small><hr/><div v-for="item in cart.items" :key="item.productId" class="ticket-line"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.price * item.quantity) }}</strong></div><hr/><div class="ticket-total">TOTAL <strong>${{ money(cartTotal) }}</strong></div><button class="primary checkout" :disabled="cartLoading" @click="checkout">Confirmar compra y generar orden</button></section></section>
 
-    <section v-else class="single-view"><section class="panel orders-panel"><div class="panel-header"><div><h2>Consulta de órdenes</h2><p class="form-help">Busca por cliente o por identificador.</p></div><button class="secondary" :disabled="ordersLoading" @click="loadOrders">Actualizar cliente</button></div><div class="order-search"><label>Cliente<input v-model="customerId" placeholder="Nombre del cliente" @change="saveCustomer"/></label><button class="secondary" @click="saveCustomer">Buscar por cliente</button><label>ID de orden<input v-model="orderIdSearch" placeholder="Ej. 6a7e..."/></label><button class="secondary" @click="searchOrderById">Buscar por ID</button></div><article v-if="selectedOrder" class="order-card"><div class="order-heading"><div><strong>Orden #{{ selectedOrder.id }}</strong><small>{{ new Date(selectedOrder.createdAt).toLocaleString('es-MX') }}</small></div><button class="primary" @click="downloadTicket(selectedOrder)">Descargar PDF</button></div><ul><li v-for="item in selectedOrder.items" :key="item.productId"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(selectedOrder.total) }}</strong></div></article><p v-if="ordersLoading" class="empty-state">Cargando órdenes...</p><p v-else-if="customerId && !orders.length && !selectedOrder" class="empty-state">No hay órdenes para este cliente.</p><article v-for="order in orders" :key="order.id" class="order-card"><div class="order-heading"><div><strong>Orden #{{ order.id }}</strong><small>{{ new Date(order.createdAt).toLocaleString('es-MX') }}</small></div><button class="secondary" @click="downloadTicket(order)">PDF</button></div><ul><li v-for="item in order.items" :key="`${order.id}-${item.productId}`"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(order.total) }}</strong></div></article></section></section>
+    <section v-else class="single-view"><section class="panel orders-panel"><div class="panel-header"><div><h2>Consulta de órdenes</h2><p class="form-help">Busca por cliente, identificador o ticket PDF.</p></div><button class="secondary" :disabled="ordersLoading" @click="loadOrders">Actualizar cliente</button></div><div class="order-search"><label>Cliente<input v-model="customerId" placeholder="Nombre del cliente" @change="saveCustomer"/></label><button class="secondary" @click="saveCustomer">Buscar por cliente</button><label>ID de orden<input v-model="orderIdSearch" placeholder="Ej. 6a7e..."/></label><button class="secondary" @click="searchOrderById">Buscar por ID</button></div><label class="pdf-upload">Subir ticket PDF<input accept="application/pdf" type="file" @change="searchOrderFromPdf"/><span>{{ pdfLoading ? 'Leyendo PDF y buscando orden...' : 'Seleccionar comprobante PDF' }}</span></label><article v-if="selectedOrder" class="order-card"><div class="order-heading"><div><strong>Orden #{{ selectedOrder.id }}</strong><small>{{ new Date(selectedOrder.createdAt).toLocaleString('es-MX') }}</small></div><button class="primary" @click="downloadTicket(selectedOrder)">Descargar PDF</button></div><ul><li v-for="item in selectedOrder.items" :key="item.productId"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(selectedOrder.total) }}</strong></div></article><p v-if="ordersLoading" class="empty-state">Cargando órdenes...</p><p v-else-if="customerId && !orders.length && !selectedOrder" class="empty-state">No hay órdenes para este cliente.</p><article v-for="order in orders" :key="order.id" class="order-card"><div class="order-heading"><div><strong>Orden #{{ order.id }}</strong><small>{{ new Date(order.createdAt).toLocaleString('es-MX') }}</small></div><button class="secondary" @click="downloadTicket(order)">PDF</button></div><ul><li v-for="item in order.items" :key="`${order.id}-${item.productId}`"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul><div class="ticket-total">TOTAL <strong>${{ money(order.total) }}</strong></div></article></section></section>
 
     <div v-if="customerModal" class="modal-backdrop"><form class="modal-card" @submit.prevent="saveCustomer"><h2>Ingresa tu nombre</h2><p>Necesitamos identificar tu carrito y tus órdenes.</p><input v-model="customerId" autofocus placeholder="Tu nombre"/><div class="modal-actions"><button class="secondary" type="button" @click="customerModal=false">Cancelar</button><button class="primary">Guardar y continuar</button></div></form></div>
     <div v-if="productDetail" class="modal-backdrop"><article class="modal-card product-modal"><button class="close" @click="productDetail=null">×</button><img :src="imageSource(productDetail.imageFiles)" @error="handleImageError"/><span class="category">{{ productDetail.category?.join(', ') }}</span><h2>{{ productDetail.name }}</h2><p>{{ productDetail.description }}</p><strong>${{ money(productDetail.price) }}</strong><button class="primary" @click="requestAdd(productDetail); productDetail=null">Agregar al carrito</button></article></div>
