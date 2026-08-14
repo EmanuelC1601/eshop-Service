@@ -36,6 +36,7 @@ public sealed class CreateOrderHandler(IBasketClient basketClient, IOrderReposit
             LineTotal = item.Price * item.Quantity
         }).ToList();
         var subtotal = items.Sum(item => item.LineTotal);
+        var tax = Math.Round(subtotal * 0.16m, 2, MidpointRounding.AwayFromZero);
         var order = new Order
         {
             Id = ObjectId.GenerateNewId().ToString(),
@@ -44,7 +45,8 @@ public sealed class CreateOrderHandler(IBasketClient basketClient, IOrderReposit
             CreatedAt = DateTime.UtcNow,
             Items = items,
             Subtotal = subtotal,
-            Total = subtotal
+            Tax = tax,
+            Total = subtotal + tax
         };
 
         await repository.CreateAsync(order, cancellationToken);

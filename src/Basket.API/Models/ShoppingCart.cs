@@ -15,5 +15,6 @@ namespace Basket.API.Models
         public int Quantity { get; set; } = 1;
         public string Color { get; set; } = default!;
         public decimal Price { get; set; }
+        public DateTime AddedAt { get; set; } = DateTime.UtcNow;
     }
 }
