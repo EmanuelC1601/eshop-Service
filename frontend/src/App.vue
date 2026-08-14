@@ -15,11 +15,14 @@ const form = reactive({ name: '', description: '', categoryText: '', imageFiles:
 const products = ref([]);
 const cart = ref({ id: CART_USER, userName: CART_USER, items: [] });
 const customerId = ref(localStorage.getItem('eshop-customer-id') || CART_USER);
+const activeView = ref('catalog');
+const orders = ref([]);
 const editingName = ref('');
 const totalCount = ref(0);
 const loading = ref(false);
 const saving = ref(false);
 const cartLoading = ref(false);
+const ordersLoading = ref(false);
 const message = ref('');
 const error = ref('');
 
@@ -135,11 +138,24 @@ async function loadCart() {
   } finally { cartLoading.value = false; }
 }
 
+async function loadOrders() {
+  const normalized = customerId.value.trim();
+  if (!normalized) return setError('Escribe el nombre del cliente para consultar sus órdenes.');
+  ordersLoading.value = true;
+  try {
+    const response = await requestJson(ORDERS_API, `/api/orders/customer/${encodeURIComponent(normalized)}`);
+    orders.value = response.orders || [];
+  } catch (err) {
+    setError(`No se pudieron cargar las órdenes: ${err.message}`);
+  } finally { ordersLoading.value = false; }
+}
+
 async function saveCart(nextItems, successMessage) {
   cartLoading.value = true;
   try {
     const nextCart = { id: customerId.value, userName: customerId.value, items: nextItems };
-    await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify(nextCart) });
+    // Basket.API receives a StoreBasketRequest, whose payload wraps the cart.
+    await requestJson(BASKET_API, '/basket', { method: 'POST', body: JSON.stringify({ cart: nextCart }) });
     cart.value = nextCart;
     setNotice(successMessage);
   } catch (err) { setError(`No se pudo actualizar el carrito: ${err.message}`); }
@@ -182,7 +198,7 @@ async function selectCustomer() {
   customerId.value = normalized;
   localStorage.setItem('eshop-customer-id', normalized);
   cart.value = { id: normalized, userName: normalized, items: [] };
-  await loadCart();
+  await Promise.all([loadCart(), loadOrders()]);
   setNotice(`Carrito de ${normalized} cargado.`);
 }
 
@@ -194,24 +210,39 @@ async function checkout() {
       method: 'POST',
       body: JSON.stringify({ customerId: customerId.value, basketId: cart.value.id })
     });
+    await requestJson(BASKET_API, `/basket/${encodeURIComponent(customerId.value)}`, { method: 'DELETE' });
+    cart.value = { id: customerId.value, userName: customerId.value, items: [] };
+    await loadOrders();
+    activeView.value = 'orders';
     setNotice(`Compra generada correctamente. ID de compra: ${result.orderId}`);
   } catch (err) { setError(`No se pudo generar la compra: ${err.message}`); }
   finally { cartLoading.value = false; }
 }
 
+function changeView(view) {
+  activeView.value = view;
+  if (view === 'cart') loadCart();
+  if (view === 'orders') loadOrders();
+}
 function changePage(delta) { search.pageNumber += delta; loadProducts(); }
 function searchFromFirstPage() { search.pageNumber = 1; loadProducts(); }
-onMounted(async () => { await Promise.all([loadProducts(), loadCart()]); });
+onMounted(async () => { await Promise.all([loadProducts(), loadCart(), loadOrders()]); });
 </script>
 
 <template>
   <main class="app-shell">
     <section class="toolbar">
       <div><p class="eyebrow">Colección urbana · eShop</p><h1>Tu escaparate de moda</h1><p class="hero-copy">Administra prendas y agrega productos a un carrito persistente.</p></div>
-      <div class="cart-summary"><span>🛍️ {{ cartItemsCount }} prendas</span><strong>${{ money(cartTotal) }}</strong></div>
+      <button class="cart-summary" type="button" @click="changeView('cart')"><span>🛍️ {{ cartItemsCount }} prendas</span><strong>${{ money(cartTotal) }}</strong></button>
     </section>
 
-    <section class="workspace">
+    <nav class="view-navigation" aria-label="Navegación principal">
+      <button :class="{ active: activeView === 'catalog' }" type="button" @click="changeView('catalog')">Catálogo</button>
+      <button :class="{ active: activeView === 'cart' }" type="button" @click="changeView('cart')">Carrito <span v-if="cartItemsCount">({{ cartItemsCount }})</span></button>
+      <button :class="{ active: activeView === 'orders' }" type="button" @click="changeView('orders')">Mis órdenes</button>
+    </nav>
+
+    <section v-if="activeView === 'catalog'" class="workspace catalog-workspace">
       <form class="panel editor" @submit.prevent="submitProduct">
         <div class="panel-header"><h2>{{ isEditing ? 'Editar producto' : 'Nuevo producto' }}</h2><button class="secondary" type="button" @click="resetForm">{{ isEditing ? 'Cancelar' : 'Limpiar' }}</button></div>
         <p v-if="isEditing" class="form-help">El nombre identifica al producto y no se cambia durante la edición.</p>
@@ -235,8 +266,11 @@ onMounted(async () => { await Promise.all([loadProducts(), loadCart()]); });
         <div class="pagination"><button class="secondary" :disabled="!canGoBack" type="button" @click="changePage(-1)">Anterior</button><span>Página {{ search.pageNumber }} de {{ totalPages }}</span><button class="secondary" :disabled="!canGoForward" type="button" @click="changePage(1)">Siguiente</button></div>
       </section>
 
+    </section>
+
+    <section v-else-if="activeView === 'cart'" class="single-view">
       <aside class="panel cart-panel">
-        <div class="panel-header"><h2>Carrito</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" type="button" @click="clearCart">Vaciar</button></div>
+        <div class="panel-header"><h2>Carrito de compras</h2><button class="secondary" :disabled="cartLoading || !cart.items.length" type="button" @click="clearCart">Vaciar</button></div>
         <form class="customer-form" @submit.prevent="selectCustomer"><label>Cliente<input v-model="customerId" placeholder="Ej. Emanuel" /></label><button class="secondary" type="submit">Cargar</button></form>
         <p class="form-help">Carrito activo: <strong>{{ customerId }}</strong></p>
         <p v-if="cartLoading" class="form-help">Actualizando carrito...</p><p v-else-if="!cart.items.length" class="empty-state">Tu carrito está vacío.</p>
@@ -244,6 +278,20 @@ onMounted(async () => { await Promise.all([loadProducts(), loadCart()]); });
         <div class="cart-total"><span>Total</span><strong>${{ money(cartTotal) }}</strong></div>
         <button class="primary checkout" :disabled="cartLoading || !cart.items.length" type="button" @click="checkout">Realizar compra</button>
       </aside>
+    </section>
+
+    <section v-else class="single-view">
+      <section class="panel orders-panel">
+        <div class="panel-header"><div><h2>Órdenes del cliente</h2><p class="form-help">Consulta el historial guardado en MongoDB.</p></div><button class="secondary" :disabled="ordersLoading" type="button" @click="loadOrders">{{ ordersLoading ? 'Consultando...' : 'Actualizar' }}</button></div>
+        <form class="customer-form" @submit.prevent="selectCustomer"><label>Cliente<input v-model="customerId" placeholder="Ej. Emanuel" /></label><button class="secondary" type="submit">Consultar</button></form>
+        <p class="form-help">Mostrando órdenes de: <strong>{{ customerId || 'sin cliente seleccionado' }}</strong></p>
+        <p v-if="ordersLoading" class="empty-state">Cargando órdenes...</p>
+        <p v-else-if="!orders.length" class="empty-state">Este cliente todavía no tiene órdenes registradas.</p>
+        <article v-for="order in orders" v-else :key="order.id" class="order-card">
+          <div class="order-heading"><div><strong>Orden #{{ order.id }}</strong><small>{{ new Date(order.createdAt).toLocaleString('es-MX') }}</small></div><strong>${{ money(order.total) }}</strong></div>
+          <ul><li v-for="item in order.items" :key="`${order.id}-${item.productId}`"><span>{{ item.productName }} × {{ item.quantity }}</span><strong>${{ money(item.lineTotal) }}</strong></li></ul>
+        </article>
+      </section>
     </section>
   </main>
 </template>

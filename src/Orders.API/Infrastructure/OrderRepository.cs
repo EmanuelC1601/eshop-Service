@@ -7,6 +7,7 @@ namespace Orders.API.Infrastructure;
 public interface IOrderRepository
 {
     Task CreateAsync(Order order, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Order>> GetByCustomerAsync(string customerId, CancellationToken cancellationToken);
 }
 
 public class OrderRepository : IOrderRepository
@@ -22,4 +23,9 @@ public class OrderRepository : IOrderRepository
 
     public Task CreateAsync(Order order, CancellationToken cancellationToken) =>
         _orders.InsertOneAsync(order, cancellationToken: cancellationToken);
+
+    public async Task<IReadOnlyList<Order>> GetByCustomerAsync(string customerId, CancellationToken cancellationToken) =>
+        await _orders.Find(order => order.CustomerId == customerId)
+            .SortByDescending(order => order.CreatedAt)
+            .ToListAsync(cancellationToken);
 }

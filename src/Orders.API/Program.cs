@@ -80,6 +80,22 @@ app.MapPost("/api/orders", async (
 .ProducesProblem(StatusCodes.Status500InternalServerError)
 .WithSummary("Genera una orden usando el carrito existente del cliente");
 
+app.MapGet("/api/orders/customer/{customerId}", async (
+    string customerId,
+    IOrderRepository repository,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(customerId))
+        return Results.BadRequest(new { message = "customerId es obligatorio." });
+
+    var orders = await repository.GetByCustomerAsync(customerId.Trim(), cancellationToken);
+    return Results.Ok(new { orders });
+})
+.WithName("GetOrdersByCustomer")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.WithSummary("Consulta todas las órdenes de un cliente");
+
 // Render calls /health while starting the container. It must represent the
 // liveness of this API, not the availability of an external managed database.
 app.MapHealthChecks("/health", new HealthCheckOptions
